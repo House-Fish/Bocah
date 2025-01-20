@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, render_template
 from datetime import datetime
 import uuid
 import json
@@ -11,6 +11,7 @@ DATABASE_FILE = 'events_db.json'
 
 # Initialize empty database structure
 initial_db = {
+    'email': {},
     'transportation': {},  # device_id -> {mode -> duration}
     'air_conditioner': {}  # device_id -> duration
 }
@@ -117,6 +118,48 @@ def get_stats(device_id):
         'air_conditioner': ac_duration
     })
 
+@app.route('/register_email', methods=['POST'])
+def register_email():
+    data = request.get_json()
+    
+    # Validate common fields
+    if not all(k in data for k in ['device_id', 'email']):
+        return jsonify({'error': 'Missing required fields'}), 400
+    
+    if not validate_uuid(data['device_id']):
+        return jsonify({'error': 'Invalid device_id format'}), 400
+    
+    device_id = data['device_id']
+    email = data['email']
+
+    try:
+        db = load_db()
+        # Store the email in the separate 'email' dictionary
+        db['email'][device_id] = email 
+
+        save_db(db)
+        
+        return jsonify({
+            'success': True,
+            'message': 'Email registered successfully'
+        })
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/get_email/<device_id>', methods=['GET'])
+def get_email(device_id):
+    if not validate_uuid(device_id):
+        return jsonify({'error': 'Invalid device_id format'}), 400
+
+    db = load_db()
+    email = db['email'].get(device_id)
+
+    if email:
+        return jsonify({'device_id': device_id, 'email': email})
+    else:
+        return jsonify({'error': 'No email found for the device_id'}), 404
+
 @app.route('/reset', methods=['POST'])
 def reset_database():
     try:
@@ -132,4 +175,4 @@ if __name__ == '__main__':
     # Ensure database file exists
     if not os.path.exists(DATABASE_FILE):
         save_db(initial_db)
-    app.run(host="0.0.0.0", port=5000)
+    app.run(host="localhost", port=5000)
