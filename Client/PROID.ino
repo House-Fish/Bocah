@@ -68,7 +68,7 @@ void sendTransportationData(String mode, unsigned long duration) {
         String jsonPayload = "{";
         jsonPayload += "\"type\": \"transportation\",";
         jsonPayload += "\"device_id\": \"" + String(deviceId) + "\",";
-        jsonPayload += "\"mode\": \"" + mode.toLowerCase() + "\",";
+        jsonPayload += "\"mode\": \"" + mode + "\",";
         jsonPayload += "\"duration\": " + String(duration / 1000) + ",";
         jsonPayload += "\"message\": \"Mode change detected\"";
         jsonPayload += "}";
