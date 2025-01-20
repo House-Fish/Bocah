@@ -11,19 +11,15 @@ Adafruit_MPU6050 mpu;
 // Wi-Fi credentials
 const char* ssid = "Easytohack";
 const char* password = "12345678";
-
-// Server endpoint
-const char* serverUrl = "http://128.199.180.89:5000/events";  // Updated endpoint
-
-// Device ID (replace with your device's UUID)
-const char* deviceId = "550e8400-e29b-41d4-a716-446655440000";  // Example UUID
+const char* serverUrl = "http://128.199.180.89:5000/events";
+const char* deviceId = "550e8400-e29b-41d4-a716-446655440000";
 
 // DHT11 configuration
 #define DHTPIN 13
 #define DHTTYPE DHT11
 DHT dht(DHTPIN, DHTTYPE);
 
-// Constants
+// Constants for motion detection
 const int SAMPLE_SIZE = 50;
 float accelerationBuffer[SAMPLE_SIZE];
 float deltaBuffer[SAMPLE_SIZE];
@@ -31,9 +27,16 @@ int bufferIndex = 0;
 
 // Timing variables
 unsigned long modeStartTime = 0;
-unsigned long lastSensorSendTime = 0;
-const unsigned long sensorSendInterval = 15000; // 15 seconds
 String currentMode = "Unknown";
+
+// AC detection variables
+const float AC_TEMP_THRESHOLD = 25.0;  // Temperature threshold for AC detection (adjust as needed)
+const float TEMP_CHANGE_THRESHOLD = 3.0;  // Minimum temperature change to consider
+const unsigned long MIN_AC_DURATION = 10000;  // Minimum duration (10 seconds) to consider as valid AC use
+bool inACRoom = false;
+unsigned long acEntryTime = 0;
+float lastTemperature = 0;
+bool isFirstReading = true;
 
 float calculateStandardDeviation(float data[], int size) {
     float sum = 0, mean = 0, variance = 0;
@@ -58,7 +61,6 @@ void connectToWiFi() {
     Serial.println("\nConnected to Wi-Fi!");
 }
 
-// Function to send transportation data
 void sendTransportationData(String mode, unsigned long duration) {
     if (WiFi.status() == WL_CONNECTED) {
         HTTPClient http;
@@ -67,7 +69,7 @@ void sendTransportationData(String mode, unsigned long duration) {
         jsonPayload += "\"type\": \"transportation\",";
         jsonPayload += "\"device_id\": \"" + String(deviceId) + "\",";
         jsonPayload += "\"mode\": \"" + mode.toLowerCase() + "\",";
-        jsonPayload += "\"duration\": " + String(duration / 1000) + ","; // Convert to seconds
+        jsonPayload += "\"duration\": " + String(duration / 1000) + ",";
         jsonPayload += "\"message\": \"Mode change detected\"";
         jsonPayload += "}";
 
@@ -86,7 +88,6 @@ void sendTransportationData(String mode, unsigned long duration) {
     }
 }
 
-// Function to send AC (temperature/humidity) data
 void sendACData(unsigned long duration) {
     if (WiFi.status() == WL_CONNECTED) {
         HTTPClient http;
@@ -94,8 +95,8 @@ void sendACData(unsigned long duration) {
         String jsonPayload = "{";
         jsonPayload += "\"type\": \"air-conditioner\",";
         jsonPayload += "\"device_id\": \"" + String(deviceId) + "\",";
-        jsonPayload += "\"duration\": " + String(duration / 1000) + ","; // Convert to seconds
-        jsonPayload += "\"message\": \"Mode change detected\"";
+        jsonPayload += "\"duration\": " + String(duration / 1000) + ",";
+        jsonPayload += "\"message\": \"Left AC room\"";
         jsonPayload += "}";
 
         http.begin(serverUrl);
@@ -111,6 +112,43 @@ void sendACData(unsigned long duration) {
 
         http.end();
     }
+}
+
+void checkACStatus() {
+    float currentTemp = dht.readTemperature();
+    
+    if (isnan(currentTemp)) {
+        Serial.println("Failed to read temperature!");
+        return;
+    }
+
+    if (isFirstReading) {
+        lastTemperature = currentTemp;
+        isFirstReading = false;
+        return;
+    }
+
+    // Check for entering AC room
+    if (!inACRoom && currentTemp < AC_TEMP_THRESHOLD && 
+        (lastTemperature - currentTemp) >= TEMP_CHANGE_THRESHOLD) {
+        inACRoom = true;
+        acEntryTime = millis();
+        Serial.printf("Entered AC room. Temperature: %.2f°C\n", currentTemp);
+    }
+    // Check for leaving AC room
+    else if (inACRoom && 
+             ((currentTemp >= AC_TEMP_THRESHOLD) || 
+              (currentTemp - lastTemperature) >= TEMP_CHANGE_THRESHOLD)) {
+        inACRoom = false;
+        unsigned long duration = millis() - acEntryTime;
+        
+        if (duration >= MIN_AC_DURATION) {
+            Serial.printf("Left AC room. Duration: %lu seconds\n", duration / 1000);
+            sendACData(duration);
+        }
+    }
+
+    lastTemperature = currentTemp;
 }
 
 void setup() {
@@ -159,7 +197,7 @@ void loop() {
 
     String newMode;
     if (stdDev < 0.2 && avgDelta < 0.05) {
-        newMode = "walk";  // Changed to match API spec
+        newMode = "walk";
     } else if (stdDev >= 0.2 && stdDev < 1.0 && avgDelta >= 0.05 && avgDelta < 0.2) {
         newMode = "walk";
     } else if (stdDev >= 1.0 && stdDev < 2.5 && avgDelta >= 0.2 && avgDelta < 0.6) {
@@ -167,35 +205,20 @@ void loop() {
     } else if (stdDev >= 2.5 && avgDelta >= 0.6) {
         newMode = "car";
     } else {
-        newMode = "walk";  // Default to walk when unknown
+        newMode = "walk";
     }
 
-    // Check if mode has changed
     if (newMode != currentMode) {
         unsigned long timeSpent = millis() - modeStartTime;
         Serial.printf("Mode changed to: %s (Time spent: %lu seconds)\n", 
                      newMode.c_str(), timeSpent / 1000);
-
-        // Send transportation data
         sendTransportationData(currentMode, timeSpent);
-
         currentMode = newMode;
         modeStartTime = millis();
     }
 
-    // Send AC data periodically
-    if (millis() - lastSensorSendTime >= sensorSendInterval) {
-        float temp = dht.readTemperature();
-        float humi = dht.readHumidity();
-
-        if (!isnan(temp) && !isnan(humi)) {
-            Serial.printf("Temp: %.2f°C, Humidity: %.2f%%\n", temp, humi);
-            // Send AC data
-            sendACData(sensorSendInterval);
-        }
-
-        lastSensorSendTime = millis();
-    }
+    // Check AC status every loop iteration
+    checkACStatus();
 
     delay(500);
 }
