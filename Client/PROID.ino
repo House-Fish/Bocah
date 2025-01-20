@@ -31,7 +31,7 @@ String currentMode = "Unknown";
 
 // AC detection variables
 const float AC_TEMP_THRESHOLD = 25.0;  // Temperature threshold for AC detection (adjust as needed)
-const float TEMP_CHANGE_THRESHOLD = 3.0;  // Minimum temperature change to consider
+const float TEMP_CHANGE_THRESHOLD = 1.0;  // Minimum temperature change to consider
 const unsigned long MIN_AC_DURATION = 10000;  // Minimum duration (10 seconds) to consider as valid AC use
 bool inACRoom = false;
 unsigned long acEntryTime = 0;
