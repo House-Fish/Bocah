@@ -132,4 +132,4 @@ if __name__ == '__main__':
     # Ensure database file exists
     if not os.path.exists(DATABASE_FILE):
         save_db(initial_db)
-    app.run(debug=True)
+    app.run(host="0.0.0.0", port=5000)
